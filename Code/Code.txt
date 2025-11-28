@@ -1,0 +1,569 @@
+const TOKEN = "8521826994:AAEtF7qf2tn5lUMsfgDLi3iI1Qh5qOrUThX8k"; // Thay TOKEN của bạn
+const API_URL = `https://api.telegram.org/bot${TOKEN}`;
+const SHEET_ID = "15jZjGuSDXaOgl1OIhC-dE0zLs2_8zRty2AezyJMOvnQ"; // Thay ID Sheet của bạn
+const ADMIN_IDS = ["924080826"]; // Thay ID Telegram của bạn
+
+// --- CẤU HÌNH VỊ TRÍ (Layout MỚI) ---
+// Tiêu đề sẽ ở dòng START_ROW - 1 (tức là dòng 15)
+// Dữ liệu bắt đầu ghi từ dòng 16
+const START_ROW = 16; 
+const START_COL = 2; 
+
+// --- CẤU HÌNH NHÓM ---
+const CATEGORIES = [
+  "🍜 Ăn uống", "🛍️ Mua sắm", "🎉 Đám xá", "⛽ Đổ xăng", "🛵 Xe cộ", 
+  "👪 Bố mẹ", "💕 Vợ chồng", "👶 Con cái", "💸 Chuyển khoản", 
+  "🏠 Điện nước", "🏥 Thuốc men", "📦 Khác"
+];
+
+const SHORTCUTS = {
+  "an": "🍜 Ăn uống", "uong": "🍜 Ăn uống", "mua": "🛍️ Mua sắm", "sam": "🛍️ Mua sắm",
+  "dam": "🎉 Đám xá", "tham": "🎉 Đám xá", "xang": "⛽ Đổ xăng", "dau": "⛽ Đổ xăng",
+  "xe": "🛵 Xe cộ", "sua": "🛵 Xe cộ", "bm": "👪 Bố mẹ", "ob": "👪 Bố mẹ",
+  "vk": "💕 Vợ chồng", "ck": "💕 Vợ chồng", "con": "👶 Con cái", "hoc": "👶 Con cái",
+  "ck": "💸 Chuyển khoản", "bank": "💸 Chuyển khoản", "gui": "💸 Chuyển khoản",
+  "dien": "🏠 Điện nước", "nuoc": "🏠 Điện nước", "nha": "🏠 Điện nước",
+  "thuoc": "🏥 Thuốc men", "kham": "🏥 Thuốc men"
+};
+
+// --- 1. SETUP ---
+function setWebhook() {
+  // 👇 THAY URL WEB APP CỦA BẠN VÀO DƯỚI 👇
+  var webAppUrl = 'https://script.google.com/macros/s/AKfycby6saFceJQ0NKHMFKE7U26qo9-BrCV_nIgEp94EmQj24jMHcTeq9Pckmd28PNWRaqc0/exec'; 
+  var payload = { method: 'setWebhook', url: webAppUrl };
+  UrlFetchApp.fetch(API_URL + '/', { method: 'post', payload: JSON.stringify(payload), contentType: 'application/json' });
+}
+
+function setupBotMenu() {
+  const commands = [
+    { command: "thu", description: "Ghi thu nhập" },
+    { command: "chi", description: "Ghi chi tiêu" },
+    { command: "report", description: "Báo cáo chi tiết" },
+    { command: "undo", description: "Xóa dòng cuối" },
+    { command: "giavang", description: "Xem giá vàng SJC" },
+    { command: "thoitiet", description: "Xem thời tiết Hải Phòng" },
+    { command: "help", description: "Hướng dẫn sử dụng" }
+  ];
+  UrlFetchApp.fetch(API_URL + "/setMyCommands", { method: "post", payload: { commands: JSON.stringify(commands) } });
+}
+
+function getWeather() {
+  try {
+    // 1. CẤU HÌNH
+    const apiKey = "79fa4d8ec6844a4d90c82408252611";
+    const city = "HaiPhong";
+    // Quan trọng: Đã đổi aqi=yes để lấy dữ liệu chất lượng không khí
+    const url = `https://api.weatherapi.com/v1/current.json?key=${apiKey}&q=${city}&aqi=yes&lang=vi`; 
+
+    const response = UrlFetchApp.fetch(url);
+    const data = JSON.parse(response.getContentText());
+
+    // 2. LẤY DỮ LIỆU CƠ BẢN
+    const current = data.current;
+    const location = data.location;
+    const conditionText = current.condition.text;
+    const isDay = current.is_day === 1 ? "☀️" : "🌙";
+
+    // 3. XỬ LÝ CHẤT LƯỢNG KHÔNG KHÍ (AQI)
+    let aqiMsg = "";
+    if (current.air_quality) {
+      const aq = current.air_quality;
+      const pm25 = aq.pm2_5.toFixed(1); // Làm tròn 1 số thập phân
+      const epaIndex = aq["us-epa-index"]; // Lấy chỉ số EPA (1-6)
+
+      let aqiStatus = "Không xác định";
+      let aqiIcon = "❓";
+
+      // Đánh giá dựa trên US-EPA Index
+      switch (epaIndex) {
+        case 1: aqiStatus = "Tốt"; aqiIcon = "🟢"; break;
+        case 2: aqiStatus = "Trung bình"; aqiIcon = "🟡"; break;
+        case 3: aqiStatus = "Kém (Nhạy cảm)"; aqiIcon = "🟠"; break;
+        case 4: aqiStatus = "Xấu"; aqiIcon = "🔴"; break;
+        case 5: aqiStatus = "Rất xấu"; aqiIcon = "🟣"; break;
+        case 6: aqiStatus = "Nguy hại"; aqiIcon = "☠️"; break;
+      }
+      
+      aqiMsg = `😷 Chất lượng KK: ${aqiIcon} *${aqiStatus}*\n` + 
+               `   (PM2.5: ${pm25} µg/m³)\n`;
+    }
+
+    // 4. CẢNH BÁO THÊM (Độ ẩm, Nhiệt độ, UV)
+    let advice = [];
+    if (current.humidity < 40) advice.push("⚠️ Trời hanh khô, nhớ uống đủ nước!");
+    if (current.uv > 7) advice.push("⚠️ UV cao, hạn chế ra nắng trực tiếp.");
+    if (current.temp_c < 16) advice.push("🧣 Trời lạnh, nhớ mặc ấm.");
+    if (current.air_quality && current.air_quality["us-epa-index"] >= 4) advice.push("😷 Không khí ô nhiễm, nên đeo khẩu trang.");
+
+    const adviceMsg = advice.length > 0 ? `\n${advice.join("\n")}` : "";
+
+    // 5. TRẢ VỀ KẾT QUẢ
+    return `🌤 *THỜI TIẾT ${location.name.toUpperCase()}*\n\n` +
+           `🕒 Cập nhật: ${location.localtime.split(" ")[1]}\n\n` +
+           `──────────────\n` +
+           `🌡️ Nhiệt độ: *${current.temp_c}°C* (Cảm giác: ${current.feelslike_c}°C)\n\n` +
+           `${isDay} Trạng thái: ${conditionText}\n\n` +
+           `💧 Độ ẩm: *${current.humidity}%*\n\n` +
+           `💨 Gió: ${current.wind_kph} km/h (Hướng ${current.wind_dir})\n\n` +
+           aqiMsg + // Chèn thông tin AQI vào đây
+           adviceMsg;
+
+  } catch (e) {
+    return "❌ Không lấy được dữ liệu thời tiết lúc này: " + e.message;
+  }
+}
+
+// --- 2. XỬ LÝ CHÍNH ---
+function doPost(e) {
+  const content = JSON.parse(e.postData.contents);
+  if (content.callback_query) { handleCallback(content.callback_query); return; }
+  if (!content.message || !content.message.text) return;
+  
+  const chatId = content.message.chat.id;
+  const text = content.message.text;
+  const userId = String(content.message.from.id);
+
+  if (!isAuthorizedUser(userId)) return sendMessage(chatId, "🚫 Bạn không có quyền.");
+
+  const state = getUserState(userId);
+  
+  // 1. Xử lý hội thoại (nếu đang dở)
+  if (state && text !== "/cancel" && text !== "/start") {
+    handleConversation(chatId, userId, text, state);
+    return;
+  }
+
+  // 2. Xử lý lệnh bắt đầu bằng "/"
+  if (text.startsWith("/")) {
+    if (text === "/cancel") clearUserState(userId, chatId);
+    else if (text === "/start" || text === "/help") sendHelpMessage(chatId);
+    else if (text.startsWith("/thu") || text.startsWith("/chi")) handleCommandStart(chatId, userId, text);
+    else if (text.startsWith("/report")) handleReport(chatId, text);
+    else if (text.startsWith("/undo")) undoLast(chatId);
+    else if (text.startsWith("/giavang")) sendMessage(chatId, getGoldPrices());
+    else if (text.startsWith("/thoitiet")) sendMessage(chatId, getWeather());
+  } else {
+    // 3. Xử lý nhập liệu tự do (Thông minh hơn)
+    // Cho phép nhập: "50k an", "an 50k", "chi 50k", "50k chi"...
+    handleTextTransaction(chatId, text);
+  }
+}
+
+function sendHelpMessage(chatId) {
+  const helpText = 
+    `🤖 *HƯỚNG DẪN SỬ DỤNG BOT TÀI CHÍNH*\n` +
+    `──────────────\n\n` +
+    `1️⃣ *GHI THU / CHI*\n` +
+    `• Cách 1 (Nhanh): Gõ lệnh trực tiếp\n` +
+    `  \`/chi 50k an ăn sáng\` (Chi 50k ăn sáng)\n` +
+    `  \`chi 1tr600 dien tiền điện\` (Chi 1tr600)\n` +
+    `  \`chi 1tr23k mua\` (Chi 1tr023k)\n` +
+    `  \`/thu 10tr lương\` (Thu 10tr lương)\n` +
+    `• Cách 2 (Hội thoại): Bấm menu \`/thu\` hoặc \`/chi\` rồi làm theo hướng dẫn của Bot.\n\n` +
+    `2️⃣ *XEM BÁO CÁO (/report)*\n` +
+    `• \`/report\`: Xem tổng hợp tháng này.\n` +
+    `• \`/report 10/2025\`: Xem báo cáo tháng 10/2025.\n` +
+    `• \`/report an\`: Xem chi tiết nhóm "Ăn uống" tháng này.\n` +
+    `• \`/report xang 10/2025\`: Xem tiền xăng tháng 10.\n\n` +
+    `3️⃣ *CÁC LỆNH KHÁC*\n` +
+    `• \`/undo\`: Xóa giao dịch vừa nhập sai gần nhất.\n` +
+    `• \`/giavang\`: Xem giá vàng SJC mới nhất.\n` +
+    `• \`/cancel\`: Hủy lệnh đang nhập dở.\n\n` +
+    `💡 *Mẹo viết tắt nhóm chi tiêu:*\n` +
+    `an (Ăn uống), xe (Xe cộ), xang (Xăng), mua (Mua sắm), ck (Chuyển khoản), con (Con cái), dien/nuoc (Điện nước), thuoc (Thuốc men)`;
+
+  sendMessage(chatId, helpText);
+}
+
+// --- 3. PARSE LỆNH ---
+function handleCommandStart(chatId, userId, text) {
+  let args = text.split(" ");
+  args[0] = args[0].replace("/", ""); 
+  const type = args[0].toLowerCase(); 
+  
+  if (args.length === 1) {
+    setUserState(userId, "WAITING_AMOUNT", { type: type });
+    sendMessage(chatId, `📝 *GHI ${type.toUpperCase()}* (Chế độ hội thoại)\n\n💰 Nhập số tiền:`);
+    return;
+  }
+  processTransaction(chatId, args, type);
+}
+
+function handleTextTransaction(chatId, text) {
+  const args = text.trim().split(/\s+/); // Tách chuỗi bằng khoảng trắng
+  if (args.length < 2) return; // Bỏ qua nếu chỉ gõ 1 từ (ví dụ "hello")
+
+  const first = args[0].toLowerCase();
+  const second = args[1].toLowerCase();
+
+  // --- TRƯỜNG HỢP 1: Có chữ "thu" hoặc "chi" rõ ràng (Logic cũ) ---
+  if (['thu', 'chi'].includes(first) || ['thu', 'chi'].includes(second)) {
+    let type = ['thu', 'chi'].includes(first) ? first : second;
+    processTransaction(chatId, args, type);
+    return;
+  }
+
+  // --- TRƯỜNG HỢP 2 (MỚI): Shortcut đứng đầu + Tiền đứng sau ---
+  // Ví dụ: "an 30k phở bò" -> Tự động là CHI
+  if (SHORTCUTS[first] && isValidAmount(second)) {
+    const category = SHORTCUTS[first];
+    const amountStr = second;
+    const desc = args.slice(2).join(" ");
+    saveTransaction(chatId, amountStr, 'chi', category, desc);
+    return;
+  }
+
+  // --- TRƯỜNG HỢP 3 (MỚI): Tiền đứng đầu + Shortcut đứng sau ---
+  // Ví dụ: "30k an phở bò" -> Tự động là CHI
+  if (isValidAmount(first) && SHORTCUTS[second]) {
+    const amountStr = first;
+    const category = SHORTCUTS[second];
+    const desc = args.slice(2).join(" ");
+    saveTransaction(chatId, amountStr, 'chi', category, desc);
+    return;
+  }
+
+  // Nếu không khớp cái nào thì bot im lặng (để tránh spam khi chat bình thường)
+}
+
+function processTransaction(chatId, args, type) {
+  let amountStr, descStartIndex;
+  if (["thu", "chi"].includes(args[0].toLowerCase())) {
+    amountStr = args[1]; descStartIndex = 2;
+  } else {
+    amountStr = args[0]; descStartIndex = 2;
+  }
+
+  if (!isValidAmount(amountStr)) return sendMessage(chatId, `⚠️ Tiền không đúng (${amountStr}).`);
+
+  let category = "📦 Khác";
+  if (type === 'thu') {
+    category = "Thu nhập";
+  } else {
+    if (args[descStartIndex] && SHORTCUTS[args[descStartIndex].toLowerCase()]) {
+      category = SHORTCUTS[args[descStartIndex].toLowerCase()];
+      descStartIndex++; 
+    }
+  }
+  saveTransaction(chatId, amountStr, type, category, args.slice(descStartIndex).join(" "));
+}
+
+// --- 4. HỘI THOẠI ---
+function handleConversation(chatId, userId, text, state) {
+  const data = getUserData(userId);
+  if (state === "WAITING_AMOUNT") {
+    if (!isValidAmount(text)) return sendMessage(chatId, "⚠️ Tiền sai.");
+    data.amount = text;
+    if (data.type === 'thu') {
+      data.category = "Thu nhập";
+      setUserState(userId, "WAITING_DESC", data);
+      sendMessage(chatId, "✅ Đã nhận tiền. Nhập nguồn thu:");
+    } else {
+      setUserState(userId, "WAITING_CATEGORY", data); 
+      sendCategoryKeyboard(chatId, "📂 Chọn nhóm:");
+    }
+  } else if (state === "WAITING_DESC") {
+    saveTransaction(chatId, data.amount, data.type, data.category, text);
+    clearUserState(userId);
+  }
+}
+
+function handleCallback(callback) {
+  const userId = String(callback.from.id);
+  const data = getUserData(userId);
+  if (getUserState(userId) === "WAITING_CATEGORY") {
+    data.category = callback.data;
+    setUserState(userId, "WAITING_DESC", data);
+    editMessage(callback.message.chat.id, callback.message.message_id, `✅ Đã chọn: ${callback.data}`);
+    sendMessage(callback.message.chat.id, `📝 Nhập mô tả:`);
+  }
+  UrlFetchApp.fetch(`${API_URL}/answerCallbackQuery`, { method: "post", payload: JSON.stringify({ callback_query_id: callback.id }), contentType: 'application/json' });
+}
+
+// --- 5. LƯU DỮ LIỆU & TẠO GIAO DIỆN ---
+
+function saveTransaction(chatId, rawAmount, type, category, description) {
+  const parsedAmount = parseAmount(rawAmount);
+  const formattedDesc = description ? (description.charAt(0).toUpperCase() + description.slice(1)) : "Không mô tả";
+  const now = new Date();
+  const sheetName = getSheetNameByDate(now); 
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  let sheet = ss.getSheetByName(sheetName);
+
+  // --- TẠO SHEET & DASHBOARD NẾU CHƯA CÓ ---
+  if (!sheet) {
+    sheet = ss.insertSheet(sheetName);
+    
+    // --- KHU VỰC TỔNG QUAN (Đã đẩy lên Row 1) ---
+    sheet.getRange("B1:C1").merge().setValue("💰 TỔNG QUAN").setFontWeight("bold").setHorizontalAlignment("center").setBackground("#cfe2f3");
+    sheet.getRange("B2").setValue("📥 Thu:");
+    sheet.getRange("B3").setValue("📤 Chi:");
+    sheet.getRange("B4").setValue("💵 Dư:");
+    
+    // --- KHU VỰC CHI TIẾT (Đã đẩy lên Row 1) ---
+    sheet.getRange("E1:F1").merge().setValue("📂 CHI TIẾT CHI TIÊU").setFontWeight("bold").setHorizontalAlignment("center").setBackground("#fff2cc");
+    
+    // --- CÔNG THỨC (Cập nhật theo START_ROW mới) ---
+    sheet.getRange("C2").setFormula(`=SUMIF(C${START_ROW}:C; "thu"; E${START_ROW}:E)`);
+    sheet.getRange("C3").setFormula(`=SUMIF(C${START_ROW}:C; "chi"; E${START_ROW}:E)`);
+    sheet.getRange("C4").setFormula('=C2-C3').setFontWeight("bold");
+    
+    // Query chi tiết
+    const queryFormula = `=IFERROR(QUERY(B${START_ROW}:F; "SELECT D, SUM(E) WHERE C = 'chi' GROUP BY D ORDER BY SUM(E) DESC LABEL D '', SUM(E) ''"); "Chưa có dữ liệu")`;
+    sheet.getRange("E2").setFormula(queryFormula);
+    
+    // Định dạng số
+    sheet.getRange("C2:C4").setNumberFormat("#,##0");
+    sheet.getRange("F2:F20").setNumberFormat("#,##0");
+    
+    // --- TIÊU ĐỀ BẢNG DỮ LIỆU ---
+    const headerRow = START_ROW - 1; // Dòng 15
+    sheet.getRange(headerRow, START_COL, 1, 5).setValues([["Thời gian", "Loại", "Nhóm", "Số tiền", "Mô tả"]]);
+    sheet.getRange(headerRow, START_COL, 1, 5).setFontWeight("bold").setBackground("#4c4c4c").setFontColor("white");
+    
+    // Kích thước cột
+    sheet.setColumnWidth(1, 20); sheet.setColumnWidth(2, 140); sheet.setColumnWidth(4, 130); sheet.setColumnWidth(6, 200); 
+    sheet.getRange("E:E").setNumberFormat("#,##0"); 
+  }
+
+  // --- GHI DỮ LIỆU ---
+  const dataRange = sheet.getRange(`B${START_ROW}:B`); 
+  const lastRowIndex = dataRange.getValues().filter(String).length; 
+  const writeRow = START_ROW + lastRowIndex;
+
+  sheet.getRange(writeRow, START_COL, 1, 5).setValues([[now, type, category, parsedAmount, formattedDesc]]);
+  sheet.getRange(writeRow, START_COL, 1, 5).setBorder(true, true, true, true, true, true, "#d9d9d9", SpreadsheetApp.BorderStyle.SOLID);
+  
+  // Xử lý Dropdown
+  const categoryCell = sheet.getRange(writeRow, 4);
+  const rule = SpreadsheetApp.newDataValidation().requireValueInList(CATEGORIES).setAllowInvalid(true).build();
+  if (category === "Thu nhập") categoryCell.clearDataValidations(); 
+  else categoryCell.setDataValidation(rule);
+
+  // Lưu trạng thái Undo
+  PropertiesService.getScriptProperties().setProperty(`CAN_UNDO_${chatId}`, writeRow);
+
+  // --- GỬI TIN NHẮN ---
+  const icon = type === 'thu' ? "🟢" : "🔴";
+  const title = type === 'thu' ? "GHI NHẬN THU NHẬP" : "GHI NHẬN CHI TIÊU";
+  
+  const message = 
+    `${icon} *${title}*\n` +
+    `──────────────\n\n` + 
+    `💰 *${formatCurrency(parsedAmount)}*\n\n` + 
+    `📂 *Nhóm:* ${category}\n\n` + 
+    `📝 *Nội dung:* ${formattedDesc}\n\n` + 
+    `🕒 ${now.toLocaleTimeString("vi-VN", {hour: '2-digit', minute:'2-digit'})} - ${sheetName}`;
+
+  sendMessage(chatId, message);
+}
+
+// --- 6. REPORT & UTILS (UPDATED) ---
+
+function handleReport(chatId, text) {
+  let sheetName;
+  let displayTime;
+  let targetCategory = null;
+
+  const argsStr = text.replace("/report", "").trim().toLowerCase();
+  const dateMatch = argsStr.match(/(\d{1,2})\/(\d{4})/);
+  
+  if (dateMatch) {
+    const month = parseInt(dateMatch[1]);
+    const year = dateMatch[2];
+    sheetName = `T${month}-${year}`;
+    displayTime = `${month}/${year}`;
+  } else {
+    const now = new Date();
+    sheetName = getSheetNameByDate(now);
+    displayTime = `${now.getMonth() + 1}/${now.getFullYear()}`;
+  }
+
+  let keyword = argsStr.replace(/(\d{1,2})\/(\d{4})/, "").trim();
+  if (keyword) {
+    if (SHORTCUTS[keyword]) {
+      targetCategory = SHORTCUTS[keyword];
+    } else {
+      const found = CATEGORIES.find(cat => cat.toLowerCase().includes(keyword));
+      if (found) targetCategory = found;
+    }
+  }
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(sheetName);
+  
+  if (!sheet) {
+    return sendMessage(chatId, `⚠️ Không tìm thấy dữ liệu tháng *${displayTime}*.`);
+  }
+  
+  const lastRow = sheet.getLastRow();
+  if (lastRow < START_ROW) {
+    return sendMessage(chatId, `📊 Tháng *${displayTime}* chưa có giao dịch nào.`);
+  }
+
+  // Lấy dữ liệu từ START_ROW
+  const data = sheet.getRange(`B${START_ROW}:F${lastRow}`).getValues();
+  let resultText = "";
+  let totalAmount = 0;
+  let count = 0;
+
+  if (targetCategory) {
+    const details = [];
+    data.forEach(row => {
+      if (row[0] && row[2] === targetCategory) {
+        const date = new Date(row[0]).toLocaleDateString("vi-VN", {day:'2-digit', month:'2-digit'});
+        const money = parseFloat(row[3]);
+        const desc = row[4];
+        
+        details.push(`- ${date}: *${formatCurrency(money)}* (${desc})`);
+        totalAmount += money;
+        count++;
+      }
+    });
+
+    if (count === 0) return sendMessage(chatId, `ℹ️ Không có giao dịch nào thuộc nhóm *${targetCategory}* trong tháng ${displayTime}.`);
+
+    resultText = 
+      `📂 *BÁO CÁO: ${targetCategory.toUpperCase()}*\n` +
+      `🗓️ Tháng: ${displayTime}\n` +
+      `──────────────\n` +
+      `💰 Tổng cộng: *${formatCurrency(totalAmount)}*\n` +
+      `🔢 Số giao dịch: ${count}\n\n` +
+      `📝 *Chi tiết:*\n` +
+      details.join("\n");
+
+  } else {
+    let totalInc = 0, totalExp = 0;
+    let catReport = {};
+
+    data.forEach(row => {
+      if(row[0]) {
+        const type = row[1]; const cat = row[2] || "📦 Khác"; const amt = parseFloat(row[3]) || 0;
+        if (type === 'thu') totalInc += amt;
+        else {
+          totalExp += amt;
+          catReport[cat] = (catReport[cat] || 0) + amt;
+        }
+      }
+    });
+
+    let catText = "";
+    Object.entries(catReport).sort((a, b) => b[1] - a[1]).forEach(([k, v]) => catText += `- ${k}: *${formatCurrency(v)}*\n\n`);
+    
+    const balance = totalInc - totalExp;
+    const emoji = balance >= 0 ? "📈" : "📉";
+
+    resultText = 
+      `📊 *BÁO CÁO TỔNG HỢP THÁNG ${displayTime}*\n` +
+      `──────────────\n` +
+      `📥 Thu: *${formatCurrency(totalInc)}*\n` +
+      `📤 Chi: *${formatCurrency(totalExp)}*\n` +
+      `💰 Dư: *${formatCurrency(balance)}* ${emoji}\n\n` +
+      `📂 *CHI TIẾT CHI TIÊU:*\n${catText || "_Trống_"}`;
+  }
+
+  sendMessage(chatId, resultText);
+}
+
+function undoLast(chatId) {
+  const undoKey = `CAN_UNDO_${chatId}`;
+  const allowedRow = PropertiesService.getScriptProperties().getProperty(undoKey);
+
+  if (!allowedRow) {
+    return sendMessage(chatId, "🚫 *Không thể Undo!*\nBạn chỉ được xóa 1 lần cho giao dịch vừa mới nhập.");
+  }
+
+  const ss = SpreadsheetApp.openById(SHEET_ID);
+  const sheet = ss.getSheetByName(getSheetNameByDate(new Date()));
+  
+  if (sheet) {
+    const dataRange = sheet.getRange(`B${START_ROW}:B`);
+    const lastRowIndex = dataRange.getValues().filter(String).length;
+    const currentRow = START_ROW + lastRowIndex - 1;
+
+    if (lastRowIndex > 0 && currentRow == parseInt(allowedRow)) {
+      const targetRange = sheet.getRange(currentRow, START_COL, 1, 5);
+      
+      const rowData = targetRange.getValues()[0];
+      const amount = rowData[3] || 0;
+      const desc = rowData[4] || "Không mô tả";
+      
+      targetRange.clearContent();
+      targetRange.clearFormat();
+      targetRange.clearDataValidations();
+      
+      PropertiesService.getScriptProperties().deleteProperty(undoKey);
+      
+      sendMessage(chatId, `✅ Đã xóa giao dịch cuối:\n\n🗑️ *${formatCurrency(amount)}* - ${desc}`);
+      
+    } else {
+      PropertiesService.getScriptProperties().deleteProperty(undoKey);
+      sendMessage(chatId, "⚠️ Không tìm thấy giao dịch khớp lệnh để xóa.");
+    }
+  } else {
+    sendMessage(chatId, "ℹ️ Tháng này chưa có dữ liệu.");
+  }
+}
+
+// --- CÁC HÀM XỬ LÝ SỐ TIỀN MỚI ---
+
+function parseAmount(text) {
+  if (!text) return 0;
+  // Xóa dấu phẩy, dấu chấm nếu có, chuyển về chữ thường
+  let s = text.toString().toLowerCase().replace(/,/g, "").trim();
+
+  // TRƯỜNG HỢP 1: Dạng kết hợp (Ví dụ: 1tr600, 1tr600k, 1tr5)
+  // Logic: Tìm chữ "tr" nằm giữa
+  if (s.includes("tr") && s.indexOf("tr") < s.length - 2) { 
+    // Tách phần trước và sau chữ "tr"
+    let parts = s.split("tr");
+    let phanTrieu = parseFloat(parts[0]) * 1000000;
+    
+    // Xử lý phần đuôi (xóa chữ 'k' nếu có)
+    let duoiStr = parts[1].replace("k", "").trim();
+    let phanDuoi = parseFloat(duoiStr);
+    
+    if (isNaN(phanDuoi)) return phanTrieu;
+
+    // Logic thông minh cho phần đuôi:
+    // Nếu nhập "1tr5" (đuôi là 5, độ dài 1 ký tự) => Hiểu là 1.5 triệu (cộng thêm 500k)
+    // Nếu nhập "1tr600" => Hiểu là 1 triệu + 600k
+    if (phanDuoi < 10 && duoiStr.length === 1) {
+       return phanTrieu + (phanDuoi * 100000);
+    } else {
+       return phanTrieu + (phanDuoi * 1000);
+    }
+  }
+
+  // TRƯỜNG HỢP 2: Dạng đơn giản (10tr, 500k, 500000)
+  let multiplier = 1;
+  if (s.includes("tr")) multiplier = 1000000;
+  else if (s.includes("k")) multiplier = 1000;
+
+  return parseFloat(s.replace(/tr|k/gi, "")) * multiplier;
+}
+
+function isValidAmount(a) {
+  const val = parseAmount(a);
+  return !isNaN(val) && val > 0;
+}
+
+function sendCategoryKeyboard(chatId, text) {
+  const keyboard = []; let row = [];
+  CATEGORIES.forEach((cat, i) => {
+    row.push({ text: cat, callback_data: cat });
+    if (row.length === 2 || i === CATEGORIES.length - 1) { keyboard.push(row); row = []; }
+  });
+  UrlFetchApp.fetch(`${API_URL}/sendMessage`, { method: "post", payload: JSON.stringify({ chat_id: chatId, text: text, reply_markup: { inline_keyboard: keyboard } }), contentType: 'application/json' });
+}
+
+function editMessage(chatId, messageId, text) { UrlFetchApp.fetch(`${API_URL}/editMessageText`, { method: "post", payload: JSON.stringify({ chat_id: chatId, message_id: messageId, text: text }), contentType: 'application/json' }); }
+function setUserState(id, s, d) { CacheService.getScriptCache().put(id, JSON.stringify({state:s, data:d}), 600); }
+function getUserState(id) { const c = CacheService.getScriptCache().get(id); return c ? JSON.parse(c).state : null; }
+function getUserData(id) { const c = CacheService.getScriptCache().get(id); return c ? JSON.parse(c).data : {}; }
+function clearUserState(id, cid) { CacheService.getScriptCache().remove(id); if(cid) sendMessage(cid, "❌ Hủy."); }
+function getSheetNameByDate(d) { return `T${d.getMonth() + 1}-${d.getFullYear()}`; }
+function isAuthorizedUser(id) { return ADMIN_IDS.includes(String(id)); }
+function formatCurrency(n) { return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(n); }
+function sendMessage(chatId, text) { UrlFetchApp.fetch(`${API_URL}/sendMessage`, { method: "post", payload: JSON.stringify({ chat_id: chatId, text: text, parse_mode: "Markdown" }), contentType: 'application/json' }); }
+function getGoldPrices() { try { const ts = new Date().getTime(); const url = `https://data.giavangvietnam.com/api/data/sjc?cache=${ts}`; const ss = SpreadsheetApp.openById(SHEET_ID); let s = ss.getSheetByName("goldprices") || ss.insertSheet("goldprices"); s.getRange("A1").setFormula(`=IMPORTHTML("${url}"; "table"; 1)`); const d = s.getRange("A3:D3").getValues()[0]; return `🔔 *Giá Vàng SJC*\nMua: ${d[2]}\nBán: ${d[3]}`; } catch (e) { return "❌ Lỗi."; } }
